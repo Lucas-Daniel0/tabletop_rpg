@@ -1,0 +1,48 @@
+{
+  "exportado_em": "2026-10-15",
+  "projeto_antigo": {
+    "nome": "tabletop-rpg",
+    "ref": "dulzopyrmklficdjjgiu",
+    "url": "https://dulzopyrmklficdjjgiu.supabase.co",
+    "regiao": "sa-east-1",
+    "postgres": "17.11",
+    "organization_id": "apgspbpsoggeviafnwcr",
+    "criado_em": "2026-10-14"
+  },
+  "chaves_publicas": {
+    "anon_legacy_jwt": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImR1bHpvcHlybWtsZmljZGpqZ2l1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIwMjEwMjAsImV4cCI6MjEwNzU5NzAyMH0.cphKhuNEOoEUIemGGYvncwddHkZG5ow6aSIZ4NZbcCI",
+    "publishable": "sb_publishable_Y2n2kx8ET-yII03MSmOj9A_2_5eAgh6"
+  },
+  "migracoes_aplicadas": [
+    "tabletop_core_schema",
+    "fix_campaign_code_security_definer",
+    "fix_join_campaign_ambiguity"
+  ],
+  "edge_functions": [],
+  "extensoes_ativas_alem_das_padrao": [],
+  "contagem_de_linhas": {
+    "auth.users": 0,
+    "profiles": 0,
+    "campaigns": 0,
+    "campaign_assets": 0,
+    "characters": 0,
+    "campaign_members": 0
+  },
+  "ajustes_de_painel_a_refazer": [
+    "Auth > URL Configuration (Site URL e Redirect URLs)",
+    "Auth > Providers > Allow anonymous sign-ins",
+    "Auth > Providers > Google (redirect usa o novo ref)",
+    "SMTP proprio",
+    "Confirm email (ligar/desligar)"
+  ],
+  "nota": "Somente chaves publicas aqui. Senha do banco e service_role nao foram lidas nem salvas.",
+  "projeto_novo": {
+    "nome": "tabletop-rpg",
+    "ref": "cbttmcffujohaoqnfqgz",
+    "url": "https://cbttmcffujohaoqnfqgz.supabase.co",
+    "organizacao": "table top (Free)",
+    "regiao": "sa-east-1",
+    "publishable_key": "sb_publishable_g63aZjYEs4hAwZMDqsBG8g_OYJXnERz",
+    "esquema_aplicado_em": "2026-10-15 (001_schema.sql: 5 tabelas, 5 RLS, 8 policies, 6 funcoes, 5 gatilhos)"
+  }
+}

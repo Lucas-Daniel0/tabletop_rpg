@@ -1,0 +1,34 @@
+# Configuração do projeto Supabase do Tabletop RPG (aplicada por `supabase config push`).
+# Só vale para o projeto cbttmcffujohaoqnfqgz. NUNCA aponte este arquivo para outro projeto.
+project_id = "tabletop-rpg"
+
+[api]
+enabled = true
+schemas = ["public", "graphql_public"]
+max_rows = 1000
+
+[db]
+major_version = 17
+
+[auth]
+enabled = true
+# O workflow troca USUARIO/REPO pelo dono e nome reais do repositório antes de enviar.
+site_url = "https://USUARIO.github.io/REPO"
+additional_redirect_urls = ["https://USUARIO.github.io/REPO/**", "http://localhost:3000", "http://127.0.0.1:3000"]
+jwt_expiry = 3600
+enable_refresh_token_rotation = true
+enable_signup = true
+enable_anonymous_sign_ins = true   # "Entrar como convidado"
+minimum_password_length = 6
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false       # true = exige confirmar o e-mail (precisa de SMTP próprio)
+
+# Google (opcional): crie o OAuth Client, defina GOOGLE_CLIENT_ID e GOOGLE_SECRET como secrets
+# do GitHub, troque enabled para true e descomente as linhas.
+[auth.external.google]
+enabled = false
+# client_id = "env(GOOGLE_CLIENT_ID)"
+# secret = "env(GOOGLE_SECRET)"

@@ -3,12 +3,13 @@
 
 async function startMaster(opts) {
   opts = opts || {}; const cloudCamp = opts.cloud || null;
+  if (cloudCamp) store.set('vtt-last', { role: 'master', id: cloudCamp.row.id, name: cloudCamp.row.name || '' });
   const root = $('#root'); root.innerHTML = '';
   const cfg = cloudCamp ? { mode: 'online', url: CLOUD.url, key: CLOUD.key, code: cloudCamp.row.code, cloud: true } : Object.assign({ mode: 'online', url: CLOUD.url, key: CLOUD.key, code: genCode() }, store.get('vtt-cfg', {}));
   let C = newCampaign();
   const fixC = () => { for (const k of ['areas', 'elements', 'walls', 'zones', 'fog', 'lights', 'creatures']) C[k] = C[k] || []; C.characters = C.characters || {}; };
   if (cloudCamp) {
-    C = Object.assign(newCampaign(), cloudCamp.row.data || {}); if (cloudCamp.row.name && (!C.name || C.name === 'Nova campanha')) C.name = cloudCamp.row.name; C.characters = {}; fixC();
+    C = Object.assign(newCampaign(), cloudCamp.row.data || {}); if (cloudCamp.row.name && (!C.name || C.name === 'Nova campanha')) C.name = cloudCamp.row.name; C.characters = {}; for (const p of (C.pcs || [])) C.characters[p.id] = p; fixC();
     Assets.clear(); for (const id in (cloudCamp.assets || {})) Assets.data[id] = cloudCamp.assets[id];
   } else {
     const saved = await DB.get('campaign');
@@ -22,15 +23,31 @@ async function startMaster(opts) {
   const eng = new MasterEngine(C, {
     send: (m, to) => { if (net) net.send(m, to); },
     onChange: () => { save(); stage.dirty = true; },
-    onPlayers: () => { renderPlayers(); }, onMove: () => { stage.dirty = true; }
+    onPlayers: () => { renderPlayers(); if (preview) renderBanner(); }, onMove: () => { stage.dirty = true; }
   });
 
+  window.__dbgM = { C: () => C, eng };
   /* ---------- estrutura da tela ---------- */
   const cv = h('canvas', { class: 'stage' });
   const header = h('header', { id: 'top' }), toolsEl = h('aside', { id: 'tools' }), optBar = h('div', { id: 'optbar' });
   const panel = h('aside', { id: 'panel' }), footer = h('footer', { id: 'areasbar' });
   const empty = h('div', { class: 'emptystate' });
-  const banner = h('div', { class: 'banner', hidden: true }, 'Pré-visualização: é assim que os jogadores veem. ', h('button', { class: 'btn small', onclick: () => setPreview(false) }, 'Voltar ao editor'));
+  const banner = h('div', { class: 'banner', hidden: true });
+  let pv = { type: 'all', id: null }; // ponto de vista da pré-visualização: todos os jogadores | um jogador | "como se alguém estivesse na área X"
+  const pvOpt = () => pv.type === 'char' && C.characters[pv.id] ? { char: pv.id } : pv.type === 'area' && C.areas.some(a => a.id === pv.id) ? { area: pv.id } : null;
+  function renderBanner() {
+    banner.innerHTML = '';
+    const chars = Object.values(C.characters), opts = [['all', 'Todos os jogadores']].concat(chars.map(c => ['c:' + c.id, '👤 ' + c.name]), C.areas.map(a => ['a:' + a.id, '📍 Como se alguém estivesse em "' + a.name + '"' + (a.reveal === 'hidden' ? ' (oculta)' : '')]));
+    const cur = pv.type === 'char' ? 'c:' + pv.id : pv.type === 'area' ? 'a:' + pv.id : 'all';
+    const sel_ = h('select', { value: cur, onchange: e => { const v = e.target.value; pv = v === 'all' ? { type: 'all', id: null } : { type: v[0] === 'c' ? 'char' : 'area', id: v.slice(2) }; renderBanner(); focusPreview(); stage.dirty = true; } }, opts.map(o => h('option', { value: o[0] }, o[1])));
+    const vs = visibleAreaSet(C, pvOpt() || {}), n = C.areas.filter(a => vs.has(a.id)).length;
+    banner.append(h('span', {}, 'Visão do jogador · '), sel_, h('span', { class: 'muted sm' }, n ? n + ' área(s) visível(is)' : 'nenhuma área visível — ninguém está em uma área revelada'), h('button', { class: 'btn small', onclick: () => focusPreview() }, '⌖ Ir até lá'), h('button', { class: 'btn small', onclick: () => setPreview(false) }, 'Voltar ao editor'));
+  }
+  function focusPreview() {
+    const vs = visibleAreaSet(C, pvOpt() || {}); const p = pvOpt();
+    if (p && p.char) { const ch = C.characters[p.char]; if (ch) { stage.centerOn(ch.x, ch.y); return; } }
+    const as = C.areas.filter(a => vs.has(a.id)); if (as.length) { const a = as[0]; stage.focusRect(a.x - 40, a.y - 40, a.w + 80, a.h + 80, 20); }
+  }
   const stageWrap = h('main', { id: 'stagewrap' }, cv, banner, empty);
   root.append(h('div', { id: 'app' }, header, toolsEl, h('div', { id: 'center' }, optBar, stageWrap), panel, footer));
   const stage = new Stage(cv);
@@ -50,10 +67,16 @@ async function startMaster(opts) {
     if (cloudCamp) { cloudDirty = true; if (cloudState === 'saved') { cloudState = 'saving'; paintCloud(); } saveT = setTimeout(cloudSave, 2500); }
     else saveT = setTimeout(() => DB.set('campaign', { campaign: C, assets: Assets.data }), 700);
   }
-  async function leaveToHome() {
+  async function leaveToHome(next) {
     clearTimeout(saveT); if (cloudCamp) { cloudDirty = true; await cloudSave(); if (cloudState === 'error') { toast('Não saiu: não consegui salvar. Tente de novo.', 4000); return; } }
-    if (net) stopSession(); stage.destroy(); showHome();
+    else DB.set('campaign', { campaign: C, assets: Assets.data });
+    if (net) stopSession(); stage.destroy(); APP.guard = null; (typeof next === 'function' ? next : goHome)();
   }
+  /* o logo, o menu do perfil e "Sair" passam por aqui: salva e avisa se a sessão está ao vivo */
+  APP.guard = go => {
+    const run = () => leaveToHome(go);
+    if (net && eng.live) askConfirm('A sessão está ao vivo. Sair agora desconecta os jogadores. Salvar e sair mesmo assim?', run, 'Salvar e sair'); else run();
+  };
   function snap() { return JSON.stringify(Object.assign({}, C, { characters: undefined })); }
   function pushHist() { const s = snap(); if (hist[hist.length - 1] !== s) { hist.push(s); if (hist.length > 60) hist.shift(); redo = []; } }
   function restore(s) { const o = JSON.parse(s), chars = C.characters; Object.assign(C, o); C.characters = chars; sel = sel.filter(x => findObj(x)); changed(); refreshAll(); }
@@ -84,7 +107,7 @@ async function startMaster(opts) {
   function deleteSel() {
     if (!sel.length) return; pushHist();
     for (const s of sel) {
-      if (s.t === 'char') { if (net) net.send({ t: 'kick' }, s.id); delete C.characters[s.id]; delete eng.players[s.id]; }
+      if (s.t === 'char') { const cx = C.characters[s.id]; if (net && cx && !cx.pc) net.send({ t: 'kick' }, s.id); delete C.characters[s.id]; if (cx && !cx.pc) delete eng.players[s.id]; }
       else { const L = LISTS[s.t](); const i = L.findIndex(o => o.id === s.id); if (i >= 0) L.splice(i, 1); }
     }
     sel = []; changed(); eng.broadcast(); refreshAll();
@@ -112,8 +135,9 @@ async function startMaster(opts) {
   /* ---------- desenho ---------- */
   stage.drawFn = (ctx, W, H, dpr, t, dark) => {
     let scene, o;
-    if (preview) { const v = buildView(C); scene = { grid: v.grid, showGrid: v.showGrid, areas: v.areas, elements: v.elements, walls: v.walls, zones: [], fog: v.fog, lights: v.lights, tokens: v.tokens }; o = { master: false, time: t, dark }; }
+    if (preview) { const v = buildView(C, pvOpt()); scene = { grid: v.grid, showGrid: v.showGrid, tokenScale: v.tokenScale, areas: v.areas, elements: v.elements, walls: v.walls, zones: [], fog: v.fog, lights: v.lights, tokens: v.tokens }; o = { master: false, time: t, dark, ownId: pv.type === 'char' ? pv.id : null }; }
     else { scene = masterScene(C); o = { master: true, time: t, dark, layers, overlay: drawOverlay }; }
+    o.base = stage.base; o.reuse = stage.reuse;
     renderScene(ctx, W, H, dpr, scene, stage.cam, o);
     return sceneAnimated(scene);
   };
@@ -312,8 +336,9 @@ async function startMaster(opts) {
     if (k === 'escape') { wallLast = null; pickTarget = null; if (tool !== 'select') setTool('select'); else { sel = []; refreshAll(); } stage.dirty = true; return; }
     if (k === 'enter' && tool === 'wall') { wallLast = null; stage.dirty = true; return; }
     if (k === 'delete' || k === 'backspace') { e.preventDefault(); deleteSel(); return; }
-    if (k.startsWith('arrow') && sel.length) {
-      e.preventDefault(); pushHist(); const st = e.shiftKey ? G() : G() / 2, dx = k === 'arrowleft' ? -st : k === 'arrowright' ? st : 0, dy = k === 'arrowup' ? -st : k === 'arrowdown' ? st : 0;
+    const wasd = !mod && k.length === 1 && 'wasd'.includes(k) && sel.some(x => x.t === 'char' || x.t === 'creature'); // com um personagem/criatura selecionado, WASD move (sem selecionar, continuam os atalhos de ferramenta)
+    if ((k.startsWith('arrow') || wasd) && sel.length) {
+      e.preventDefault(); pushHist(); const st = e.shiftKey ? G() : G() / 2, L = k === 'arrowleft' || k === 'a', R = k === 'arrowright' || k === 'd', U = k === 'arrowup' || k === 'w', Dn = k === 'arrowdown' || k === 's', dx = L ? -st : R ? st : 0, dy = U ? -st : Dn ? st : 0;
       for (const s of sel) { const o = findObj(s); if (!o) continue; if ('x1' in o) { o.x1 += dx; o.x2 += dx; o.y1 += dy; o.y2 += dy; } else { o.x += dx; o.y += dy; } }
       changed({ tokens: true }); buildInspector(); return;
     }
@@ -355,13 +380,13 @@ async function startMaster(opts) {
   function renderHeader() {
     header.innerHTML = '';
     const nameIn = h('input', { type: 'text', class: 'cname', value: C.name, oninput: e => { C.name = e.target.value; save(); eng.soon(); } });
-    const menuBtn = h('button', { class: 'btn small', onclick: () => popMenu(menuBtn, (cloudCamp ? [['← Minhas mesas (salva e sai)', leaveToHome]] : (Cloud.user ? [['← Minhas mesas', () => { if (net) stopSession(); stage.destroy(); showHome(); }]] : [])).concat([
+    const menuBtn = h('button', { class: 'btn small', onclick: () => popMenu(menuBtn, (cloudCamp ? [['← Início (salva e sai)', () => navHome()]] : (Cloud.user ? [['← Início', () => navHome()]] : [['← Início', () => navHome()]])).concat([
       ['Nova campanha', () => askConfirm('Começar uma campanha nova? A atual será apagada deste navegador (exporte antes se quiser guardar).', newCamp, 'Apagar e começar')],
       ['Exportar campanha (.json)', exportCamp], ['Importar campanha (.json)', importCamp], ['Enquadrar todo o mapa', fitAll]])) }, 'Campanha ▾');
     const chip = (k, label, tip) => h('button', { class: 'chip sm' + (layers[k] ? ' on' : ''), title: tip, onclick: () => { layers[k] = !layers[k]; stage.dirty = true; renderHeader(); } }, label);
     const live = !!(net && eng.live);
     header.append(
-      h('div', { class: 'logo' }, 'TABLETOP'),
+      brandLink(22),
       menuBtn, nameIn, cloudCamp ? h('span', { id: 'cloudstate', class: 'cloudstate ' + cloudState }, cloudState === 'saving' ? '☁ salvando…' : cloudState === 'error' ? '☁ erro ao salvar' : '☁ salvo') : null,
       h('button', { class: 'btn small', title: 'Desfazer (Ctrl+Z)', onclick: undo }, '↶'), h('button', { class: 'btn small', title: 'Refazer', onclick: redoIt }, '↷'),
       h('button', { class: 'chip sm' + (C.snap ? ' on' : ''), title: 'Alinhar à grade', onclick: () => { C.snap = !C.snap; save(); renderHeader(); } }, 'Imã'),
@@ -372,7 +397,14 @@ async function startMaster(opts) {
       h('button', { class: 'btn small ' + (live ? 'live' : ''), onclick: () => { tab = 'session'; renderPanel(); } }, live ? '● Sessão ' + cfg.code : 'Iniciar sessão'),
       h('button', { class: 'btn small panel-toggle', onclick: () => panel.classList.toggle('open') }, '☰'));
   }
-  function setPreview(on) { preview = on; banner.hidden = !on; renderHeader(); stage.dirty = true; }
+  function setPreview(on) {
+    preview = on; banner.hidden = !on;
+    if (on) { // sem jogadores e sem área sempre visível, o preview ficaria preto: começa "como se alguém estivesse" na área em foco
+      const vs = visibleAreaSet(C); if (pv.type === 'all' && !vs.size && C.areas.length) { const c = stage.cam, a = areaAtPoint(C.areas, c.x + stage.cssW / 2 / c.z, c.y + stage.cssH / 2 / c.z) || C.areas[0]; pv = { type: 'area', id: a.id }; }
+      renderBanner();
+    }
+    renderHeader(); renderEmpty(); stage.dirty = true;
+  }
 
   /* ---------- barra de áreas ---------- */
   function renderAreasBar() {
@@ -394,11 +426,11 @@ async function startMaster(opts) {
     const cur = replaceArea && replaceArea.w ? { cw: Math.round(replaceArea.w / G() * 2) / 2, ch: Math.round(replaceArea.h / G() * 2) / 2 } : {};
     const r = await mapDialog({ title: replaceArea ? 'Trocar imagem do mapa' : 'Mapa a partir de imagem', img, cw: cur.cw, ch: cur.ch, name: replaceArea ? replaceArea.name : (f.name || 'Mapa').replace(/\.[^.]+$/, '').slice(0, 30), ok: replaceArea ? 'Aplicar' : 'Criar mapa' }); if (!r) return;
     try {
-      toast('Processando imagem…'); const m = processMapImage(img, r.cw, r.ch, r), id = uid('m'); Assets.put(id, m.data); pushHist();
+      toast('Processando imagem…'); const m = await processMapImage(img, r.cw, r.ch, r), id = uid('m'); Assets.put(id, m.data); pushHist();
       if (replaceArea) { replaceArea.bg = id; replaceArea.w = r.cw * G(); replaceArea.h = r.ch * G(); replaceArea.smooth = !r.pixel; if (r.name) replaceArea.name = r.name; changed(); eng.broadcast(); buildInspector(); return; }
       const a = addAreaObj(freeSpotX(C), 0, r.cw * G(), r.ch * G(), { bg: id, smooth: !r.pixel, name: r.name || 'Mapa' });
       if (C.areas.length === 1 && !r.name) a.name = 'Mapa principal';
-      changed(); eng.broadcast(); stage.focusRect(a.x - 40, a.y - 40, a.w + 80, a.h + 80, 20); selectAndInspect([{ t: 'area', id: a.id }]); toast('Mapa criado (' + r.cw + '×' + r.ch + ' blocos, ' + Math.round(m.ppb) + ' px/bloco).', 4000);
+      changed(); eng.broadcast(); stage.focusRect(a.x - 40, a.y - 40, a.w + 80, a.h + 80, 20); selectAndInspect([{ t: 'area', id: a.id }]); toast('Mapa criado (' + r.cw + '×' + r.ch + ' blocos, ' + m.w + '×' + m.h + ' px, ' + Math.round(m.ppb) + ' px/bloco' + (m.original ? ', original' : '') + ').', 4500);
     } catch (e) { console.error(e); toast('Falha ao processar a imagem.'); }
   }
 
@@ -445,14 +477,17 @@ async function startMaster(opts) {
         const c = thumbOf(d); const el = h('button', { class: 'citem' + (catSel === d.id && tool === 'element' ? ' on' : ''), title: d.name, onclick: () => { if (tool === 'element' && catSel === d.id) { setTool('select'); return; } catSel = d.id; setTool('element'); } }, h('canvas', { width: c.width, height: c.height, style: c.getAttribute('style') }), h('span', {}, d.name));
         el.firstChild.getContext('2d').drawImage(c, 0, 0); return el;
       })),
-      h('div', { class: 'lbl' }, 'Modelos prontos (inspirados nos mapas de Ordem Paranormal)'),
+      h('div', { class: 'lbl' }, 'Mapas prontos — Ordem Paranormal'),
       h('div', { class: 'btncol' },
         h('button', { class: 'btn', onclick: () => loadTemplate('facility') }, '🏚 Base de contenção (celas, ala médica, laboratório, ritual)'),
         h('button', { class: 'btn', onclick: () => loadTemplate('island') }, '🏝 Vila da ilha (floresta, casas, névoa central)')),
+      h('div', { class: 'lbl' }, 'Mapas prontos — D&D'),
+      h('div', { class: 'btncol' }, Object.entries(DND_TEMPLATES).map(([k, t]) => h('button', { class: 'btn', title: t.note, onclick: () => loadTemplate(k) }, t.icon + ' ' + t.name))),
       h('p', { class: 'muted sm' }, 'Os modelos entram como uma área nova (anexo). Tudo neles é editável: mova, redimensione, troque cores.'));
   }
   function loadTemplate(name) {
-    if (tool !== 'select') setTool('select'); pushHist(); const a = name === 'facility' ? tplFacility(C, freeSpotX(C), 0, { addEl, addWall, addZone, addFog, addLight, addAreaObj, addCreature }) : tplIsland(C, freeSpotX(C), 0, { addEl, addWall, addZone, addFog, addLight, addAreaObj, addCreature });
+    if (tool !== 'select') setTool('select'); pushHist(); const tf = name === 'facility' ? tplFacility : name === 'island' ? tplIsland : DND_TEMPLATES[name].fn;
+    const a = tf(C, freeSpotX(C), 0, { addEl, addWall, addZone, addFog, addLight, addAreaObj, addCreature });
     changed(); eng.broadcast(); sel = [{ t: 'area', id: a.id }]; refreshAll(); stage.focusRect(a.x - 60, a.y - 60, a.w + 120, a.h + 120, 30); toast('Modelo adicionado como nova área. Tudo é editável.');
   }
 
@@ -496,12 +531,13 @@ async function startMaster(opts) {
     const g = G(), P = [h('div', { class: 'ititle' }, typeName[s.t] + (s.t === 'el' && CATALOG[o.kind] ? ' · ' + CATALOG[o.kind].name : ''))];
     const common = () => h('div', { class: 'btnrow' }, btn('Centralizar', () => focusObj(s)), s.t !== 'char' ? btn('Duplicar', duplicateSel) : null, btn(s.t === 'char' ? 'Remover jogador' : 'Excluir', deleteSel, 'danger'));
     if (s.t === 'area') {
-      const im = o.bg ? Assets.imgs[o.bg] : null, ppb = im ? Math.round(im.width / (o.w / g)) : 0;
+      const im = o.bg ? Assets.imgs[o.bg] : null, ppb = im ? Math.round(Math.min(im.width / (o.w / g), im.height / (o.h / g))) : 0;
       P.push(row('Nome', txt(o.name, v => o.name = v)), row('Cor de fundo', col(o.color, v => o.color = v)),
         h('div', { class: 'lbl' }, 'Tamanho (em blocos)'),
         h('div', { class: 'chips' }, MAP_PRESETS.map(p => h('button', { class: 'chip sm', onclick: () => { E(() => { o.w = p[1] * g; o.h = p[2] * g; }); buildInspector(); } }, p[0]))),
         row('Largura (blocos)', num(o.w / g, .5, v => { o.w = v * g; }, 1)), row('Altura (blocos)', num(o.h / g, .5, v => o.h = v * g, 1)),
-        im ? h('div', { class: 'q ' + (ppb < 24 ? 'low' : ppb < 48 ? 'mid' : 'good'), style: 'margin:6px 0;padding:6px 9px;border-radius:7px;font-size:12px;border:1px solid var(--line)' }, 'Imagem ' + im.width + '×' + im.height + ' px → ' + ppb + ' px por bloco' + (ppb < 24 ? ' (baixa resolução)' : '')) : null,
+        im ? h('div', { class: 'q ' + ppbClass(ppb), style: 'margin:6px 0;padding:6px 9px;border-radius:7px;font-size:12px;border:1px solid var(--line)' }, 'Imagem ' + im.width + '×' + im.height + ' px → ' + ppb + ' px por bloco' + (ppb < 32 ? ' (baixa resolução: reduza os blocos)' : ppb < 56 ? ' (aceitável)' : ' (nítida)')) : null,
+        im ? h('div', { class: 'btnrow' }, btn('✨ Tamanho ideal', () => { const a = cellsFor(im.width, im.height, MAP_IDEAL_PPB); E(() => { o.w = a.cw * g; o.h = a.ch * g; }); buildInspector(); }), btn('🔍 Máx. nítido', () => { const a = cellsFor(im.width, im.height, MAP_MIN_PPB); E(() => { o.w = a.cw * g; o.h = a.ch * g; }); buildInspector(); })) : null,
         im ? h('div', { class: 'btnrow' }, btn('Ajustar proporção da imagem', () => { E(() => { o.h = o.w * im.height / im.width; }); buildInspector(); }), btn(o.smooth === false ? 'Suavizar' : 'Pixel art', () => { E(() => { o.smooth = o.smooth === false; }); buildInspector(); })) : null,
         row('Visibilidade', selEl([['auto', 'Aparece quando há jogador nela'], ['always', 'Sempre visível'], ['hidden', 'Oculta dos jogadores']], o.reveal, v => o.reveal = v)),
         row('Escuridão ' + Math.round(o.darkness * 100) + '%', rng_(o.darkness, 0, .95, .05, v => { o.darkness = v; })),
@@ -549,8 +585,8 @@ async function startMaster(opts) {
       if (isC) P.push(row('Oculta dos jogadores', chk(o.hidden, v => o.hidden = v)), row('Jogadores veem o nome', chk(o.nameVis, v => o.nameVis = v)));
       P.push(row('Tamanho (células)', num(o.size || 1, .5, v => o.size = Math.max(.5, v), .5, 6)), row('Moldura', selEl(FRAMES, o.frame, v => o.frame = v)), row('Cor', col(o.color, v => o.color = v)), row('Opacidade', rng_(o.alpha == null ? 1 : o.alpha, .15, 1, .05, v => o.alpha = v)),
         h('div', { class: 'lbl' }, 'Estado'), h('div', { class: 'chips states' }, STATES.map(st => h('button', { class: 'chip st-' + st[0] + (o.state === st[0] ? ' on' : ''), onclick: () => { E(() => o.state = st[0]); buildInspector(); } }, st[1]))));
-      if (isC) P.push(h('div', { class: 'btnrow' }, btn('🖼 Imagem da criatura', async () => { const f = await pickFile(IMG_ACCEPT); if (!f) return; let img; try { img = await loadImgFile(f); } catch (e) { toast('Não consegui abrir a imagem: ' + (e && e.message || 'formato inválido')); return; } const id = uid('t'); Assets.put(id, tokenFromImg(img)); pushHist(); o.asset = id; o.zoom = 1; o.ox = 0; o.oy = 0; changed(); eng.broadcast(); buildInspector(); }), o.asset ? btn('Remover imagem', () => { E(() => o.asset = null); buildInspector(); }) : null));
-      else P.push(row('Levar para a área', selEl([['', '— escolher —']].concat(C.areas.map(a => [a.id, a.name])), '', v => { const a = C.areas.find(q => q.id === v); if (a) { pushHist(); eng.teleport(o.id, snapToken(C, a.x + a.w / 2), snapToken(C, a.y + a.h / 2)); stage.centerOn(o.x, o.y); } })));
+      if (isC || o.pc) P.push(h('div', { class: 'btnrow' }, btn(isC ? '🖼 Imagem da criatura' : '🖼 Imagem do personagem', async () => { const f = await pickFile(IMG_ACCEPT); if (!f) return; let img; try { img = await loadImgFile(f); } catch (e) { toast('Não consegui abrir a imagem: ' + (e && e.message || 'formato inválido')); return; } const id = uid('t'); Assets.put(id, tokenFromImg(img)); pushHist(); o.asset = id; o.zoom = 1; o.ox = 0; o.oy = 0; changed(); eng.broadcast(); buildInspector(); }), o.asset ? btn('Remover imagem', () => { E(() => o.asset = null); buildInspector(); }) : null));
+      if (!isC) P.push(row('Controlado por', ownerSel(o)), h('div', { class: 'btnrow' }, btn('🎒 Itens e equipamento', () => openInv(o))), row('Levar para a área', selEl([['', '— escolher —']].concat(C.areas.map(a => [a.id, a.name])), '', v => { const a = C.areas.find(q => q.id === v); if (a) { pushHist(); eng.teleport(o.id, snapToken(C, a.x + a.w / 2), snapToken(C, a.y + a.h / 2)); stage.centerOn(o.x, o.y); } })));
       if (o.asset && o.frame !== 'full') P.push(row('Zoom da foto', rng_(o.zoom || 1, 1, 3, .02, v => o.zoom = v)), row('Foto ← →', rng_(o.ox || 0, -1, 1, .02, v => o.ox = v)), row('Foto ↑ ↓', rng_(o.oy || 0, -1, 1, .02, v => o.oy = v)));
     }
     P.push(common()); panelBody.append(...P.filter(Boolean));
@@ -574,16 +610,37 @@ async function startMaster(opts) {
   }
 
   /* --- jogadores --- */
+  const invCtx = { C: () => C, eng, pushHist: () => pushHist(), changed: () => changed(), refresh: () => { stage.dirty = true; if (tab === 'players') renderPlayers(); } };
+  function openInv(ch) { inventoryModal(invCtx, ch); }
+  function equippedStrip(ch) {
+    const list = equippedOf(C, ch.id); if (!list.length) return null;
+    return h('div', { class: 'eqmini' }, list.slice(0, 6).map(x => h('span', { title: x.it.name }, iconEl(x.it, 22))));
+  }
+  function knownPlayers() { const o = {}; for (const [pid, n] of Object.entries(C.pnames || {})) o[pid] = n; for (const [pid, p] of Object.entries(eng.players)) o[pid] = p.name || o[pid] || 'Jogador'; return o; }
+  function ownerSel(ch) {
+    const kp = knownPlayers(), cur = ownerOf(ch); if (cur && !kp[cur]) kp[cur] = 'Jogador';
+    const s = h('select', { class: 'ownsel', onchange: e => { pushHist(); eng.assign(ch.id, e.target.value || null); changed({ tokens: true }); renderPlayers(); buildInspector(); } },
+      [h('option', { value: '' }, '— ninguém (só o mestre) —')].concat(Object.entries(kp).map(([pid, n]) => h('option', { value: pid }, n + (eng.players[pid] && Date.now() - eng.players[pid].seen < 25000 ? ' ●' : '')))));
+    s.value = cur || ''; return s;
+  }
+  function addPC() {
+    pushHist(); const n = Object.values(C.characters).filter(x => x.pc).length + 1, ch = newCharacter(uid('pc'), 'Personagem ' + n); ch.owner = null; ch.pc = true; placeNew(C, ch); C.characters[ch.id] = ch;
+    changed({ tokens: true }); eng.broadcast(); selectAndInspect([{ t: 'char', id: ch.id }]); stage.centerOn(ch.x, ch.y);
+  }
   function renderPlayers() {
     if (tab !== 'players') return; panelBody.innerHTML = '';
-    const list = Object.values(C.characters);
-    if (!list.length) { panelBody.append(h('p', { class: 'muted' }, 'Nenhum jogador entrou ainda. Inicie a sessão (aba Sessão) e compartilhe o link.')); return; }
+    const list = Object.values(C.characters), ts = C.tokenScale || 1, tsOut = h('b', {}, Math.round(ts * 100) + '%');
+    panelBody.append(h('div', { class: 'tscale' }, h('div', { class: 'lbl' }, 'Tamanho dos ícones (jogadores e criaturas) ', tsOut),
+      h('input', { type: 'range', min: .5, max: 2.5, step: .05, value: ts, onpointerdown: () => pushHist(), oninput: e => { C.tokenScale = +e.target.value; tsOut.textContent = Math.round(C.tokenScale * 100) + '%'; changed(); } }),
+      h('p', { class: 'muted sm' }, 'Em mapas muito grandes os ícones ficam pequenos ao enquadrar tudo: eles nunca encolhem abaixo de ~22 px na tela. Aumente aqui se quiser mais destaque.')));
+    panelBody.append(h('div', { class: 'btnrow' }, btn('＋ Personagem do mestre', addPC)), h('p', { class: 'muted sm' }, 'Jogadores que entram já recebem o próprio personagem. Aqui você cria personagens e escolhe quem controla cada um (pode trocar a qualquer hora). Dica: selecione um personagem e use WASD ou as setas para movê-lo.'));
+    if (!list.length) { panelBody.append(h('p', { class: 'muted' }, 'Nenhum personagem ainda. Crie um acima ou inicie a sessão (aba Sessão) e compartilhe o link.')); return; }
     for (const ch of list) {
-      const p = eng.players[ch.id], online = p && Date.now() - p.seen < 25000;
+      const ow = ownerOf(ch), p = ow && eng.players[ow], online = p && Date.now() - p.seen < 25000;
       const c = h('canvas', { width: 80, height: 80, class: 'pav' }); drawTokenAt(c.getContext('2d'), { id: ch.id, name: ch.name, asset: ch.asset, frame: ch.frame, zoom: ch.zoom, ox: ch.ox, oy: ch.oy, color: ch.color, state: ch.state, alpha: 1 }, 40, 40, 70, { s: 1.5, time: 0 });
       panelBody.append(h('div', { class: 'prow' + (isSel('char', ch.id) ? ' on' : '') },
-        c, h('div', { class: 'pinfo' }, h('div', { class: 'pname' }, h('span', { class: 'dot ' + (online ? 'ok' : 'bad') }), ch.name), h('div', { class: 'chips states mini' }, STATES.map(st => h('button', { class: 'chip sm st-' + st[0] + (ch.state === st[0] ? ' on' : ''), onclick: () => { pushHist(); ch.state = st[0]; changed(); eng.broadcast(); renderPlayers(); stage.dirty = true; } }, st[1])))),
-        h('div', { class: 'pact' }, h('button', { class: 'mini', title: 'Centralizar', onclick: () => stage.centerOn(ch.x, ch.y) }, '⌖'), h('button', { class: 'mini', title: 'Selecionar', onclick: () => selectAndInspect([{ t: 'char', id: ch.id }]) }, '✎'))));
+        c, h('div', { class: 'pinfo' }, h('div', { class: 'pname' }, h('span', { class: 'dot ' + (online ? 'ok' : ow ? 'bad' : 'off') }), ch.name, ch.pc ? h('i', { class: 'pctag' }, 'do mestre') : null), h('div', { class: 'ownrow' }, h('span', { class: 'muted sm' }, 'Controlado por'), ownerSel(ch)), h('div', { class: 'chips states mini' }, STATES.map(st => h('button', { class: 'chip sm st-' + st[0] + (ch.state === st[0] ? ' on' : ''), onclick: () => { pushHist(); ch.state = st[0]; changed(); eng.broadcast(); renderPlayers(); stage.dirty = true; } }, st[1]))), equippedStrip(ch)),
+        h('div', { class: 'pact' }, h('button', { class: 'mini', title: 'Centralizar', onclick: () => stage.centerOn(ch.x, ch.y) }, '⌖'), h('button', { class: 'mini', title: 'Selecionar', onclick: () => selectAndInspect([{ t: 'char', id: ch.id }]) }, '✎'), h('button', { class: 'mini', title: 'Itens e equipamento', onclick: () => openInv(ch) }, '🎒'))));
     }
   }
 
@@ -623,11 +680,12 @@ async function startMaster(opts) {
   function renderEmpty() {
     empty.innerHTML = ''; empty.hidden = C.areas.length > 0 || preview; if (empty.hidden) return;
     empty.append(h('div', { class: 'card' }, h('h2', {}, 'Monte seu mapa'), h('p', { class: 'muted' }, 'Anexe uma imagem de mapa, comece em branco ou use um modelo e edite.'),
-      h('div', { class: 'btncol' }, h('button', { class: 'btn primary', onclick: importMapImage }, '🖼 Usar uma imagem como mapa'), h('button', { class: 'btn', onclick: newBlankArea }, '▭ Mapa em branco (montar com o catálogo)'),
-        h('button', { class: 'btn', onclick: () => loadTemplate('facility') }, '🏚 Modelo: base de contenção'), h('button', { class: 'btn', onclick: () => loadTemplate('island') }, '🏝 Modelo: vila da ilha'))));
+      h('div', { class: 'btncol' }, h('button', { class: 'btn primary', onclick: () => importMapImage() }, '🖼 Usar uma imagem como mapa'), h('button', { class: 'btn', onclick: newBlankArea }, '▭ Mapa em branco (montar com o catálogo)'),
+        h('button', { class: 'btn', onclick: () => loadTemplate('facility') }, '🏚 Modelo: base de contenção'), h('button', { class: 'btn', onclick: () => loadTemplate('island') }, '🏝 Modelo: vila da ilha'),
+        h('button', { class: 'btn', onclick: () => loadTemplate('dungeon') }, '🗝 Modelo D&D: masmorra'), h('button', { class: 'btn', onclick: () => loadTemplate('tavern') }, '🍺 Modelo D&D: taverna'))));
   }
 
-  function refreshLists() { renderAreasBar(); renderEmpty(); if (tab === 'objects') { panelBody.innerHTML = ''; buildObjects(); } else if (tab === 'players') renderPlayers(); }
+  function refreshLists() { renderAreasBar(); renderEmpty(); if (preview) renderBanner(); if (tab === 'objects') { panelBody.innerHTML = ''; buildObjects(); } else if (tab === 'players') renderPlayers(); }
   function refreshAll() { renderTools(); renderOptions(); renderHeader(); renderAreasBar(); renderPanel(); renderEmpty(); }
 
   refreshAll(); fitAll();

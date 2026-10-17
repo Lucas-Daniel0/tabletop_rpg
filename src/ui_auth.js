@@ -12,7 +12,7 @@ function busy(btn, fn, label) {
 
 /* ---------- login / cadastro ---------- */
 function showAuth(opts) {
-  opts = opts || {}; const root = $('#root'); root.innerHTML = '';
+  opts = opts || {}; resetScreen(); const root = $('#root'); root.innerHTML = '';
   let mode = opts.mode || 'in', guestOpen = false;
   const err = h('div', { class: 'err' }), info = h('div', { class: 'okmsg' });
   const nameIn = h('input', { type: 'text', placeholder: 'Seu nome', maxlength: 24, autocomplete: 'name' });
@@ -51,7 +51,7 @@ function showAuth(opts) {
     submit.textContent = mode === 'up' ? 'Criar minha conta' : 'Entrar'; passIn.autocomplete = mode === 'up' ? 'new-password' : 'current-password'; say();
   }
   root.append(h('div', { class: 'screen center' },
-    h('div', { class: 'brand' }, h('div', { class: 'logo big' }, 'TABLETOP'), h('p', { class: 'muted' }, 'Mesa de imersão para RPG de investigação paranormal')),
+    brandHero(),
     h('div', { class: 'card authcard' },
       opts.joinCode ? h('div', { class: 'invite' }, 'Você foi convidado para a mesa ', h('b', {}, opts.joinCode), '. Entre ou crie uma conta rápida para continuar.') : null,
       h('div', { class: 'tabs' }, tabIn, tabUp), nameRow,
@@ -75,18 +75,18 @@ function routeAfterAuth() {
 
 /* ---------- onboarding (3 passos) ---------- */
 function showOnboarding() {
-  const root = $('#root'); root.innerHTML = ''; const P = Cloud.profile || {}, guest = Cloud.isGuest;
+  resetScreen(); const root = $('#root'); root.innerHTML = ''; const P = Cloud.profile || {}, guest = Cloud.isGuest;
   const st = { name: P.display_name || '', role: guest ? 'player' : (P.default_role === 'master' ? 'master' : 'player'), both: false, charName: '', campName: '' };
   const ch = { name: '', frame: 'circle', color: '#c9a227', alpha: 1, state: 'normal', asset: null, zoom: 1, ox: 0, oy: 0 }; let step = 1;
   const total = () => guest ? 2 : (st.role === 'player' ? 2 : 3);
   const err = h('div', { class: 'err' });
   const wrap = h('div', { class: 'screen center' }); root.append(wrap);
-  function card(...kids) { wrap.innerHTML = ''; wrap.append(h('div', { class: 'brand' }, h('div', { class: 'logo' }, 'TABLETOP')), h('div', { class: 'card wide' }, stepDots(step, total()), ...kids)); }
+  function card(...kids) { wrap.innerHTML = ''; wrap.append(brandHero(), h('div', { class: 'card wide' }, stepDots(step, total()), ...kids)); }
   function s1() {
     step = 1; const nameIn = h('input', { type: 'text', maxlength: 24, placeholder: 'Seu nome', value: st.name, oninput: e => st.name = e.target.value });
     const role = (id, title, desc) => h('button', { type: 'button', class: 'rolecard' + (st.role === id ? ' on' : ''), onclick: () => { st.role = id; s1(); } }, h('b', {}, title), h('span', { class: 'muted sm' }, desc));
     const next = h('button', { class: 'btn primary big', onclick: () => { if (!st.name.trim()) { err.textContent = 'Diga como podemos te chamar.'; return; } err.textContent = ''; st.role === 'master' ? s3() : s2(); } }, 'Continuar');
-    card(h('div', { class: 'eyebrow' }, 'Bem-vindo'), h('h2', {}, 'Como podemos te chamar?'), nameIn,
+    card(h('h2', {}, 'Como podemos te chamar?'), nameIn,
       guest ? h('p', { class: 'muted sm' }, 'Você está como convidado: vai poder jogar nas mesas que receberem você.') : h('div', {}, h('div', { class: 'lbl' }, 'Você vai usar mais como…'),
         h('div', { class: 'roles' }, role('master', '🎲 Mestre', 'Monto mapas, controlo luz, névoa e criaturas.'), role('player', '🕯 Jogador', 'Entro nas mesas com meu personagem.')), h('p', { class: 'muted sm' }, 'Sem compromisso: você pode mestrar e jogar com a mesma conta.')),
       err, next);
@@ -96,13 +96,13 @@ function showOnboarding() {
     const fin = h('button', { class: 'btn primary big' }, 'Criar personagem e continuar'), skip = h('button', { class: 'btn ghost' }, 'Pular por enquanto');
     const done = async (save) => { err.textContent = ''; try { if (save) { if (!(ch.name || '').trim()) { err.textContent = 'Dê um nome ao personagem (ou pule).'; return; } await Cloud.saveCharacter(profileToChar(ch)); } await finish(); } catch (e) { err.textContent = friendlyAuthError(e); } };
     fin.onclick = busy(fin, () => done(true), 'Salvando…'); skip.onclick = busy(skip, () => done(false));
-    card(h('div', { class: 'eyebrow' }, 'Jogador'), h('h2', {}, 'Seu primeiro personagem'), h('p', { class: 'muted' }, 'Escolha foto (PNG, JPG, JFIF, WEBP…), moldura e cor. Dá para mudar quando quiser.'), ed, err, h('div', { class: 'btnrow' }, fin, skip));
+    card(h('h2', {}, 'Seu primeiro personagem'), h('p', { class: 'muted' }, 'Escolha foto (PNG, JPG, JFIF, WEBP…), moldura e cor. Dá para mudar quando quiser.'), ed, err, h('div', { class: 'btnrow' }, fin, skip));
   }
   function s3() {
     step = guest ? 2 : 2; const nameIn = h('input', { type: 'text', maxlength: 40, placeholder: 'ex.: A Ilha do Segredo', value: st.campName, oninput: e => st.campName = e.target.value });
     const go = h('button', { class: 'btn primary big' }, 'Criar campanha e abrir o editor');
     go.onclick = busy(go, async () => { try { await finish(true); } catch (e) { err.textContent = friendlyAuthError(e); } }, 'Criando…');
-    card(h('div', { class: 'eyebrow' }, 'Mestre'), h('h2', {}, 'Sua primeira campanha'), h('p', { class: 'muted' }, 'Cada campanha tem um código de mesa para os jogadores entrarem. Você poderá criar outras depois.'), nameIn, err, go,
+    card(h('h2', {}, 'Sua primeira campanha'), h('p', { class: 'muted' }, 'Cada campanha tem um código de mesa para os jogadores entrarem. Você poderá criar outras depois.'), nameIn, err, go,
       h('button', { class: 'btn ghost', style: 'margin-top:8px', onclick: () => finish() }, 'Deixar para depois'));
   }
   async function finish(createCamp) {
@@ -113,58 +113,7 @@ function showOnboarding() {
   s1();
 }
 
-/* ---------- painel: minhas mesas / personagens ---------- */
-async function showHome() {
-  const root = $('#root'); root.innerHTML = ''; const P = Cloud.profile || await Cloud.loadProfile(), guest = Cloud.isGuest;
-  const list = h('div', { class: 'mesas' }, h('p', { class: 'muted' }, 'Carregando…')), chars = h('div', { class: 'chars' });
-  const codeIn = h('input', { type: 'text', class: 'code', maxlength: 8, placeholder: 'CÓDIGO', oninput: e => { e.target.value = e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); } });
-  const err = h('div', { class: 'err' });
-  const join = h('button', { class: 'btn primary' }, 'Entrar na mesa'); join.onclick = busy(join, async () => { if (codeIn.value.trim().length < 3) { err.textContent = 'Digite o código da mesa.'; return; } err.textContent = ''; await enterTable(codeIn.value.trim(), null, err); }, 'Entrando…');
-  codeIn.addEventListener('keydown', e => { if (e.key === 'Enter') join.click(); });
-  const newC = h('button', { class: 'btn' }, '＋ Nova campanha (mestre)');
-  newC.onclick = busy(newC, async () => { try { const row = await Cloud.createCampaign('Nova campanha'); startMaster({ cloud: await Cloud.loadCampaign(row.id) }); } catch (e) { toast(friendlyAuthError(e)); } }, 'Criando…');
-  const upBtn = guest ? h('button', { class: 'btn small', onclick: upgradeGuestModal }, 'Criar conta') : null;
-  const out = h('button', { class: 'btn small ghost', onclick: async () => { await Cloud.signOut(); showAuth(); } }, 'Sair');
-  root.append(h('div', { class: 'screen home' },
-    h('header', { class: 'homebar' }, h('div', { class: 'logo' }, 'TABLETOP'), h('div', { class: 'who' }, h('span', {}, P.display_name || 'Aventureiro'), guest ? h('em', { class: 'tag' }, 'convidado') : null, upBtn, out)),
-    h('div', { class: 'homegrid' },
-      h('section', { class: 'card' }, h('div', { class: 'eyebrow' }, 'Mesas'), h('h2', {}, 'Minhas mesas'), list, h('div', { class: 'btnrow' }, newC),
-        h('div', { class: 'lbl' }, 'Entrar com código'), h('div', { class: 'inline' }, codeIn, join), err),
-      h('section', { class: 'card' }, h('div', { class: 'eyebrow' }, 'Jogador'), h('h2', {}, 'Meus personagens'), chars, h('div', { class: 'btnrow' }, h('button', { class: 'btn', onclick: () => charModal() }, '＋ Novo personagem'))))));
-  if (guest) root.querySelector('.homebar').after(h('div', { class: 'guestnote' }, 'Você está como convidado. Crie uma conta para não perder suas mesas e personagens se trocar de aparelho.'));
-  async function load() {
-    try {
-      const ms = await Cloud.myCampaigns(); list.innerHTML = '';
-      if (!ms.length) list.append(h('p', { class: 'muted' }, 'Nenhuma mesa ainda. Crie uma campanha ou entre com o código de um mestre.'));
-      for (const m of ms) {
-        const row = h('div', { class: 'mesa' }, h('div', { class: 'mi' }, h('b', {}, m.name), h('span', { class: 'muted sm' }, (m.role === 'master' ? 'Você é o mestre · código ' : 'Mesa · código ') + m.code)),
-          m.role === 'master' ? h('div', { class: 'ma' }, h('button', { class: 'btn small primary', onclick: async e => { e.target.disabled = true; try { startMaster({ cloud: await Cloud.loadCampaign(m.id) }); } catch (x) { toast(friendlyAuthError(x)); e.target.disabled = false; } } }, 'Abrir'),
-            h('button', { class: 'btn small', title: 'Renomear', onclick: () => renameModal(m) }, '✎'), h('button', { class: 'btn small danger', title: 'Excluir', onclick: () => askConfirm('Excluir "' + m.name + '" para sempre? Mapas, luzes e tudo da campanha serão apagados.', async () => { try { await Cloud.deleteCampaign(m.id); load(); } catch (x) { toast(friendlyAuthError(x)); } }, 'Excluir') }, '🗑'))
-            : h('div', { class: 'ma' }, h('button', { class: 'btn small primary', onclick: () => enterTable(m.code) }, 'Jogar'), h('button', { class: 'btn small ghost', title: 'Sair da mesa', onclick: async () => { try { await Cloud.leaveCampaign(m.id); load(); } catch (x) { toast(friendlyAuthError(x)); } } }, 'Sair')));
-        list.append(row);
-      }
-    } catch (e) { list.innerHTML = ''; list.append(h('div', { class: 'err' }, friendlyAuthError(e))); }
-    try {
-      const cs = await Cloud.myCharacters(); chars.innerHTML = '';
-      if (!cs.length) chars.append(h('p', { class: 'muted' }, 'Crie um personagem para entrar nas mesas rapidamente.'));
-      for (const c of cs) {
-        const cv = h('canvas', { width: 96, height: 96, class: 'pav' }); const pc = charToProfile(c);
-        const paint = () => drawTokenAt(cv.getContext('2d'), { id: c.id, name: c.name, asset: pc.asset, frame: pc.frame, zoom: pc.zoom, ox: pc.ox, oy: pc.oy, color: pc.color, state: 'normal', alpha: 1 }, 48, 48, 84, { s: 1.5, time: 0 }); paint(); setTimeout(paint, 250);
-        chars.append(h('div', { class: 'mesa' }, cv, h('div', { class: 'mi' }, h('b', {}, c.name)), h('div', { class: 'ma' }, h('button', { class: 'btn small', onclick: () => charModal(c) }, 'Editar'),
-          h('button', { class: 'btn small danger', onclick: () => askConfirm('Excluir o personagem "' + c.name + '"?', async () => { try { await Cloud.deleteCharacter(c.id); load(); } catch (x) { toast(friendlyAuthError(x)); } }, 'Excluir') }, '🗑'))));
-      }
-    } catch (e) { chars.innerHTML = ''; chars.append(h('div', { class: 'err' }, friendlyAuthError(e))); }
-  }
-  function renameModal(m) {
-    const i = h('input', { type: 'text', maxlength: 40, value: m.name }); modal('Renomear campanha', i, [{ label: 'Cancelar' }, { label: 'Salvar', cls: 'primary', fn: () => { Cloud.renameCampaign(m.id, i.value.trim() || m.name).then(load).catch(x => toast(friendlyAuthError(x))); } }]);
-  }
-  function charModal(c) {
-    const ch = c ? charToProfile(c) : { name: '', frame: 'circle', color: '#c9a227', alpha: 1, state: 'normal', asset: null, zoom: 1, ox: 0, oy: 0 };
-    const ed = CharacterEditor({ pid: userPid(), char: ch, onChange: () => { } });
-    modal(c ? 'Editar personagem' : 'Novo personagem', ed, [{ label: 'Cancelar' }, { label: 'Salvar', cls: 'primary', fn: () => { if (!(ch.name || '').trim()) { toast('Dê um nome ao personagem.'); return false; } Cloud.saveCharacter(profileToChar(ch, c && c.id)).then(load).catch(x => toast(friendlyAuthError(x))); } }]);
-  }
-  load();
-}
+/* A página Home (minhas mesas, personagens, aparência) fica em ui_profile.js */
 
 function upgradeGuestModal() {
   const m = h('input', { type: 'text', inputmode: 'email', placeholder: 'e-mail' }), p = h('input', { type: 'password', placeholder: 'senha (mín. 6)' }), err = h('div', { class: 'err' });
@@ -180,6 +129,7 @@ async function enterTable(code, charId, errEl) {
     const t = await Cloud.joinCampaign(code, charId || null);
     let pc = null; const cs = await Cloud.myCharacters(); const pick = cs.find(c => c.id === charId) || cs[0] || null; if (pick) pc = charToProfile(pick);
     const prof = { pid: userPid(), name: pc ? pc.name : (Cloud.profile && Cloud.profile.display_name) || '', char: pc || { frame: 'circle', color: '#c9a227', alpha: 1, state: 'normal', asset: null, zoom: 1, ox: 0, oy: 0 } };
+    store.set('vtt-last', { role: 'player', code: String(code).toUpperCase(), name: t && (t.campaign_name || t.out_campaign_name) || '' });
     store.set('vtt-player', prof); if (pc && pc.asset) store.set('vtt-passet', { id: pc.asset, data: Assets.data[pc.asset] }); else store.set('vtt-passet', null);
     startPlayer(String(code).toUpperCase(), { mode: 'online', url: CLOUD.url, key: CLOUD.key, cloud: true, characterId: pick ? pick.id : null, tableName: t && (t.campaign_name || t.out_campaign_name) });
   } catch (e) { const msg = friendlyAuthError(e); if (errEl) errEl.textContent = msg; else { toast(msg, 4000); showHome(); } }

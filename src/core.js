@@ -69,7 +69,7 @@ const Assets = {
 
 /* ---------- Modelo da campanha ---------- */
 function newCampaign() {
-  return { v: 1, name: 'Nova campanha', grid: 48, snap: true, showGrid: true, areas: [], elements: [], walls: [], zones: [], fog: [], lights: [], creatures: [], characters: {} };
+  return { v: 1, name: 'Nova campanha', grid: 48, tokenScale: 1, snap: true, showGrid: true, areas: [], elements: [], walls: [], zones: [], fog: [], lights: [], creatures: [], characters: {} };
 }
 function newArea(c, x, y, w, h, extra) {
   return Object.assign({ id: uid('a'), name: 'Área ' + (c.areas.length + 1), x, y, w, h, color: '#16181b', bg: null, darkness: 0, ambient: '#04050a', reveal: 'auto' }, extra || {});
@@ -82,7 +82,7 @@ const STATES = [['normal', 'Normal'], ['dying', 'Morrendo'], ['dead', 'Morto']];
 const FRAMES = [['circle', 'Círculo'], ['rounded', 'Arredondado'], ['square', 'Quadrado'], ['hex', 'Hexágono'], ['full', 'Corpo inteiro']];
 
 function newCharacter(pid, name) {
-  return { id: pid, name: name || 'Jogador', asset: null, frame: 'circle', color: '#c9a227', state: 'normal', alpha: 1, size: 1, x: 0, y: 0 };
+  return { id: pid, owner: pid, name: name || 'Jogador', asset: null, frame: 'circle', color: '#c9a227', state: 'normal', alpha: 1, size: 1, x: 0, y: 0 };
 }
 function newCreature(x, y) {
   return { id: uid('n'), name: 'Criatura', x, y, size: 1, asset: null, frame: 'rounded', color: '#a31621', state: 'normal', alpha: 1, hidden: true, nameVis: false };

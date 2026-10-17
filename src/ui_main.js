@@ -7,7 +7,7 @@ function parseHash() {
   return o;
 }
 function showLobby() {
-  const root = $('#root'); root.innerHTML = '';
+  resetScreen(); const root = $('#root'); root.innerHTML = '';
   const hs = parseHash(), saved = store.get('vtt-cfg', {}), prof = store.get('vtt-player', {});
   const join = { code: (hs.join || '').toUpperCase(), mode: hs.m || (hs.u ? 'online' : (saved.mode || 'local')), url: hs.u || saved.url || '', key: hs.k || saved.key || '' };
   const err = h('div', { class: 'err' });
@@ -25,21 +25,22 @@ function showLobby() {
     startPlayer(code, cfg);
   };
   root.append(h('div', { class: 'screen center lobby' },
-    h('div', { class: 'brand' }, h('div', { class: 'logo big' }, 'TABLETOP'), h('p', { class: 'muted' }, 'Mesa de imersão para RPG de investigação paranormal')),
+    brandHero(),
     h('div', { class: 'cards' },
-      h('div', { class: 'card' + (hs.join ? ' dim' : '') }, h('div', { class: 'eyebrow' }, 'Mestre'), h('h2', {}, 'Montar a mesa'), h('p', { class: 'muted' }, 'Crie mapas com o catálogo ou com uma imagem, posicione zonas, luzes, névoa e criaturas ocultas.'),
+      h('div', { class: 'card' + (hs.join ? ' dim' : '') }, h('h2', {}, 'Montar a mesa'), h('p', { class: 'muted' }, 'Crie mapas com o catálogo ou com uma imagem, posicione zonas, luzes, névoa e criaturas ocultas.'),
         h('button', { class: 'btn primary big', onclick: () => startMaster() }, 'Abrir editor do mestre')),
-      h('div', { class: 'card' + (hs.join ? ' hl' : '') }, h('div', { class: 'eyebrow' }, 'Jogador'), h('h2', {}, 'Entrar na mesa'), h('p', { class: 'muted' }, prof.name ? 'Bem-vindo de volta, ' + prof.name + '.' : 'Use o código (ou o link) que o mestre compartilhou.'),
+      h('div', { class: 'card' + (hs.join ? ' hl' : '') }, h('h2', {}, 'Entrar na mesa'), h('p', { class: 'muted' }, prof.name ? 'Bem-vindo de volta, ' + prof.name + '.' : 'Use o código (ou o link) que o mestre compartilhou.'),
         codeIn, showAdv ? h('details', {}, h('summary', {}, 'Conexão'), advBox) : advBox, err, h('button', { class: 'btn primary big', onclick: go }, 'Continuar')))));
   if (hs.join) advBox.style.display = 'none';
   codeIn.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
 }
 /* inicialização: links antigos (modo local / URL própria) vão para o lobby; o resto passa pela conta */
 async function boot() {
+  Prefs.init(); mountDock(); Prefs.on(v => { document.querySelectorAll('[data-tagline]').forEach(e => { e.textContent = THEMES[v.theme].tag; }); paintDock(); });
   const hs = parseHash();
   if (hs.m === 'local' || hs.u) return showLobby();
   const root = $('#root'); root.innerHTML = ''; root.append(h('div', { class: 'screen center' }, h('div', { class: 'spin' }), h('p', { class: 'muted' }, 'Conectando…')));
-  try { await Cloud.init(); } catch (e) { toast('Modo offline: ' + (e.message || e), 4500); return showLobby(); }
+  try { await Cloud.init(); Cloud.onAuth(() => paintDock()); } catch (e) { toast('Modo offline: ' + (e.message || e), 4500); return showLobby(); }
   if (hs.join) setPending(hs.join.toUpperCase());
   if (!Cloud.user) return showAuth({ joinCode: hs.join ? hs.join.toUpperCase() : '' });
   try { await afterLogin(); } catch (e) { console.error(e); toast(friendlyAuthError(e), 4500); showAuth(); }

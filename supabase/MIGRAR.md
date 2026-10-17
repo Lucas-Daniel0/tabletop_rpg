@@ -1,5 +1,7 @@
 # Mudar o Tabletop RPG para outro projeto/organização do Supabase
 
+> Atalho automático: o fluxo por GitHub Actions (README.md na raiz) já aplica o banco (`supabase/migrations/`) e os ajustes de painel (`supabase/config.toml`). Este guia é o caminho manual.
+
 Projeto antigo (será excluído): `tabletop-rpg` · ref `dulzopyrmklficdjjgiu` · região sa-east-1 · Postgres 17
 Estado na hora do backup: **0 usuários, 0 campanhas, 0 personagens, 0 imagens** → não há dados para migrar, só a estrutura.
 
@@ -33,3 +35,7 @@ Isso edita `src/cloud.js`, refaz o build e atualiza o `index.html`. Depois é s�
 
 ## 6. Testar
 Abra o site, crie conta, monte uma campanha, entre como convidado numa aba anônima com o código.
+
+## 7. Perfil e temas na conta (opcional, recomendado)
+Rode `supabase/002_profile_prefs.sql` no SQL Editor. Ele adiciona `avatar` e `prefs` à tabela `profiles`, para a foto de perfil
+e o tema escolhido acompanharem a conta em qualquer aparelho. Sem isso o app continua funcionando: foto, nome de exibição e tema ficam salvos só no navegador.

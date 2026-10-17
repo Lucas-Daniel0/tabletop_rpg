@@ -50,7 +50,29 @@ function drawWall(ctx, w) {
 }
 
 /* ---------- tokens ---------- */
-const TOKCACHE = new Map();
+const TOKCACHE = new Map(); let TOKCACHE_PX = 0;
+/* parâmetros globais da cena atual (atualizados em renderScene): escala dos ícones, zoom e tamanho mínimo na tela */
+const RS = { tokScale: 1, z: 1, tokMin: 22 };
+function tokDiam(t, grid) { return Math.max((t.size || 1) * grid * RS.tokScale, RS.tokMin / (RS.z || 1)); }
+function tokCachePut(key, cv) {
+  TOKCACHE.set(key, cv); TOKCACHE_PX += cv.width * cv.height;
+  while (TOKCACHE_PX > 30e6 && TOKCACHE.size > 1) { const k = TOKCACHE.keys().next().value, e = TOKCACHE.get(k); TOKCACHE_PX -= e.width * e.height; TOKCACHE.delete(k); }
+}
+/* pirâmide de reduções (mipmaps) do fundo do mapa: evita serrilhado ao afastar o zoom e mantém nitidez ao aproximar */
+const MIPS = new WeakMap();
+function bgMip(im, needW) {
+  const w = im.naturalWidth || im.width; if (!w || needW * 1.4 >= w) return im;
+  let lv = MIPS.get(im); if (!lv) { lv = [im]; MIPS.set(im, lv); }
+  let i = 0, cw = w;
+  while (cw / 2 >= needW && i < 6) {
+    i++; cw /= 2;
+    if (!lv[i]) {
+      const prev = lv[i - 1], pw = prev.naturalWidth || prev.width, ph = prev.naturalHeight || prev.height, c = makeCanvas(Math.max(1, pw >> 1), Math.max(1, ph >> 1)), x = c.getContext('2d');
+      x.imageSmoothingEnabled = true; x.imageSmoothingQuality = 'high'; x.drawImage(prev, 0, 0, c.width, c.height); lv[i] = c;
+    }
+  }
+  return lv[i];
+}
 function framePath(c, shape, x, y, w, h) {
   c.beginPath();
   if (shape === 'circle') c.ellipse(x + w / 2, y + h / 2, w / 2, h / 2, 0, 0, 6.2832);
@@ -110,11 +132,12 @@ function drawSkull(c, x, y, s) {
 }
 function drawTokenAt(c, t, x, y, D, o) {
   o = o || {}; const time = o.time || 0, s = o.s || 1;
-  const px = [64, 128, 256, 512].find(p => p >= D * s * 1.1) || 512;
+  const px = [64, 128, 256, 512, 1024].find(p => p >= D * s * 1.05) || 1024;
   const img = t.asset ? Assets.imgs[t.asset] : null; if (t.asset) Assets.get(t.asset);
   const key = [t.asset, img ? 1 : 0, t.frame, t.zoom || 1, t.ox || 0, t.oy || 0, t.color, (t.name || '?').charAt(0), t.state, px].join('|');
   let cv = TOKCACHE.get(key);
-  if (!cv) { cv = bakeToken(t, px); TOKCACHE.set(key, cv); if (TOKCACHE.size > 160) TOKCACHE.delete(TOKCACHE.keys().next().value); }
+  if (!cv) { cv = bakeToken(t, px); tokCachePut(key, cv); } else { TOKCACHE.delete(key); TOKCACHE.set(key, cv); }
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
   c.save();
   let al = t.alpha == null ? 1 : t.alpha; if (o.ghost) al *= .45; c.globalAlpha *= al;
   const pulse = (Math.sin(time / 260) + 1) / 2;
@@ -128,8 +151,9 @@ function drawTokenAt(c, t, x, y, D, o) {
   c.restore();
 }
 function drawToken(c, t, grid, o) {
-  const D = (t.size || 1) * grid;
+  const D = tokDiam(t, grid);
   drawTokenAt(c, t, t.x, t.y, D, o);
+  if (t.eq && t.eq.length && typeof drawEquipBadges === 'function') drawEquipBadges(c, t, D, o);
   if (o.name) {
     const fs = clamp(13 / o.s, grid * .18, grid * .5);
     c.save(); c.font = '600 ' + fs + 'px system-ui,Segoe UI,sans-serif'; c.textAlign = 'center'; c.textBaseline = 'top';
@@ -143,7 +167,7 @@ function drawToken(c, t, grid, o) {
 function objBounds(type, o, grid) {
   if (type === 'wall') return { k: 'seg', x1: o.x1, y1: o.y1, x2: o.x2, y2: o.y2 };
   if (type === 'light') return { k: 'circ', x: o.x, y: o.y, r: o.r, light: true, dir: o.dir || 0, spread: o.spread == null ? 360 : o.spread };
-  if (type === 'char' || type === 'creature') return { k: 'circ', x: o.x, y: o.y, r: (o.size || 1) * grid / 2, token: true };
+  if (type === 'char' || type === 'creature') return { k: 'circ', x: o.x, y: o.y, r: Math.max((o.size || 1) * grid * RS.tokScale, RS.tokMin / (RS.z || 1)) / 2, token: true };
   return { k: 'rect', x: o.x, y: o.y, w: o.w, h: o.h, rot: o.rot || 0 };
 }
 
@@ -151,41 +175,51 @@ function objBounds(type, o, grid) {
 function renderScene(ctx, W, H, dpr, scene, cam, o) {
   o = o || {};
   const z = cam.z, s = z * dpr, grid = scene.grid || 50, time = o.time || 0, master = !!o.master;
+  RS.tokScale = clamp(scene.tokenScale || 1, .4, 3); RS.z = z; RS.tokMin = scene.tokMin == null ? 22 : scene.tokMin;
   const L = o.layers || {};
   const vx = cam.x - 40 / z, vy = cam.y - 40 / z, vw = W / s + 80 / z, vh = H / s + 80 / z;
   const seen = (x, y, w, h) => x < vx + vw && x + w > vx && y < vy + vh && y + h > vy;
-  const world = () => ctx.setTransform(s, 0, 0, s, -cam.x * s, -cam.y * s);
-  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
-  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
-  world();
+  const world = (c) => (c || ctx).setTransform(s, 0, 0, s, -cam.x * s, -cam.y * s);
+  // elementos (a camada estática vai para um cache: só é redesenhada quando algo muda)
+  const els = scene.elements.filter(e => seen(e.x - e.w, e.y - e.h, e.w * 3, e.h * 3));
+  const layerOf = e => (CATALOG[e.kind] ? CATALOG[e.kind].layer : 1), isAnim = e => !!(CATALOG[e.kind] && CATALOG[e.kind].anim);
+  const drawBase = B => {
+  B.setTransform(1, 0, 0, 1, 0, 0); B.globalAlpha = 1; B.globalCompositeOperation = 'source-over';
+  B.fillStyle = '#000'; B.fillRect(0, 0, W, H);
+  world(B);
 
   // áreas (fundo)
   for (const a of scene.areas) {
     if (!seen(a.x, a.y, a.w, a.h)) continue;
-    ctx.save(); ctx.beginPath(); ctx.rect(a.x, a.y, a.w, a.h); ctx.clip();
-    ctx.fillStyle = a.color || '#16181b'; ctx.fillRect(a.x, a.y, a.w, a.h);
-    if (a.bg) { const im = Assets.get(a.bg); if (im) { ctx.save(); ctx.imageSmoothingEnabled = a.smooth !== false; if (a.smooth !== false) ctx.imageSmoothingQuality = 'high'; ctx.drawImage(im, a.x, a.y, a.w, a.h); ctx.restore(); } }
-    ctx.restore();
+    B.save(); B.beginPath(); B.rect(a.x, a.y, a.w, a.h); B.clip();
+    B.fillStyle = a.color || '#16181b'; B.fillRect(a.x, a.y, a.w, a.h);
+    if (a.bg) { const im = Assets.get(a.bg); if (im) { B.save(); B.imageSmoothingEnabled = a.smooth !== false; if (a.smooth !== false) B.imageSmoothingQuality = 'high'; B.drawImage(a.smooth !== false ? bgMip(im, a.w * s) : im, a.x, a.y, a.w, a.h); B.restore(); } }
+    B.restore();
   }
-  // elementos camada 0
-  const els = scene.elements.filter(e => seen(e.x - e.w, e.y - e.h, e.w * 3, e.h * 3));
-  const layerOf = e => (CATALOG[e.kind] ? CATALOG[e.kind].layer : 1);
-  for (const e of els) if (layerOf(e) === 0) drawElement(ctx, e, grid, time, s);
+  for (const e of els) if (layerOf(e) === 0 && !isAnim(e)) drawElement(B, e, grid, time, s);
   // grade
   if (scene.showGrid && L.grid !== false && grid * s > 9) {
-    ctx.save(); ctx.lineWidth = 1 / s; ctx.strokeStyle = 'rgba(255,255,255,.07)';
+    B.save(); B.lineWidth = 1 / s; B.strokeStyle = 'rgba(255,255,255,.07)';
     for (const a of scene.areas) {
       if (!seen(a.x, a.y, a.w, a.h)) continue;
-      ctx.beginPath();
+      B.beginPath();
       const x0 = Math.max(a.x, Math.floor(vx / grid) * grid), x1 = Math.min(a.x + a.w, vx + vw), y0 = Math.max(a.y, Math.floor(vy / grid) * grid), y1 = Math.min(a.y + a.h, vy + vh);
-      for (let x = a.x + Math.ceil((x0 - a.x) / grid) * grid; x <= x1; x += grid) { ctx.moveTo(x, y0); ctx.lineTo(x, y1); }
-      for (let y = a.y + Math.ceil((y0 - a.y) / grid) * grid; y <= y1; y += grid) { ctx.moveTo(x0, y); ctx.lineTo(x1, y); }
-      ctx.stroke();
+      for (let x = a.x + Math.ceil((x0 - a.x) / grid) * grid; x <= x1; x += grid) { B.moveTo(x, y0); B.lineTo(x, y1); }
+      for (let y = a.y + Math.ceil((y0 - a.y) / grid) * grid; y <= y1; y += grid) { B.moveTo(x0, y); B.lineTo(x1, y); }
+      B.stroke();
     }
-    ctx.restore();
+    B.restore();
   }
-  for (const w of scene.walls) if (seen(Math.min(w.x1, w.x2) - 10, Math.min(w.y1, w.y2) - 10, Math.abs(w.x2 - w.x1) + 20, Math.abs(w.y2 - w.y1) + 20)) drawWall(ctx, w);
-  for (const e of els) if (layerOf(e) === 1) drawElement(ctx, e, grid, time, s);
+  for (const w of scene.walls) if (seen(Math.min(w.x1, w.x2) - 10, Math.min(w.y1, w.y2) - 10, Math.abs(w.x2 - w.x1) + 20, Math.abs(w.y2 - w.y1) + 20)) drawWall(B, w);
+  for (const e of els) if (layerOf(e) === 1 && !isAnim(e)) drawElement(B, e, grid, time, s);
+
+  };
+  const bc = o.base && o.base.width === W && o.base.height === H ? o.base : null;
+  if (bc && o.reuse && bc._ok) { ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(bc, 0, 0); }
+  else if (bc) { drawBase(bc.getContext('2d')); bc._ok = true; ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(bc, 0, 0); }
+  else drawBase(ctx);
+  world(ctx);
+  for (const e of els) if (isAnim(e) && layerOf(e) <= 1) drawElement(ctx, e, grid, time, s);
 
   // criaturas (antes da escuridão: o escuro as esconde)
   const tokO = { s, time };
@@ -196,7 +230,9 @@ function renderScene(ctx, W, H, dpr, scene, cam, o) {
   for (const e of els) if (layerOf(e) === 2) drawElement(ctx, e, grid, time, s);
 
   // escuridão + luzes
-  const lights = scene.lights || [];
+  // luz das lanternas/tochas equipadas: acompanha o token (não é salva no mapa)
+  const eqL = []; for (const t of scene.tokens) if (t.lt && t.kind === 'c' && (!t.out || master || o.ownId === t.id || (o.ownIds && o.ownIds.has(t.id)))) eqL.push({ id: 'eq_' + t.id, kind: 'natural', x: t.x, y: t.y, r: t.lt.r * grid, color: t.lt.color, intensity: .9, spread: 360, dir: 0, flicker: !!t.lt.flicker, on: true });
+  const lights = (scene.lights || []).concat(eqL);
   const dark = scene.areas.filter(a => a.darkness > 0);
   const lit = l => l.on !== false && seen(l.x - l.r, l.y - l.r, l.r * 2, l.r * 2);
   const lInt = l => clamp((l.intensity == null ? 1 : l.intensity) * lightFlick(l, time), 0, 1);
@@ -216,7 +252,7 @@ function renderScene(ctx, W, H, dpr, scene, cam, o) {
   for (const l of lights) if (seen(l.x - 40, l.y - 40, 80, 80)) drawLightSprite(ctx, l, grid, time, s);
 
   // jogadores
-  for (const t of scene.tokens) if (t.kind === 'c') drawToken(ctx, t, grid, { s, time, name: true, own: o.ownId === t.id });
+  for (const t of scene.tokens) if (t.kind === 'c' && (!t.out || master || o.ownId === t.id || (o.ownIds && o.ownIds.has(t.id)))) drawToken(ctx, t, grid, { s, time, name: true, own: o.ownId === t.id || !!(o.ownIds && o.ownIds.has(t.id)) });
 
   // névoa / áreas cinzentas
   for (const f of scene.fog) {

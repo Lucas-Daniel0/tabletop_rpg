@@ -26,9 +26,11 @@ const Cloud = {
   client: null, user: null, profile: null, ready: false, _uploaded: new Set(), _subs: [],
   async init() {
     if (this.ready) return true;
-    if (!globalThis.supabase) {
+    if (!globalThis.supabase) { // o script já começou a baixar no <head>; espera por ele (ou tenta de novo se falhou)
       await new Promise((res, rej) => {
-        const s = document.createElement('script'); s.src = SUPABASE_CDN; s.onload = res; s.onerror = () => rej(new Error('Sem internet: não foi possível carregar o cliente Supabase.')); document.head.appendChild(s);
+        const ex = document.getElementById('sb-cdn'), fail = () => rej(new Error('Sem internet: não foi possível carregar o cliente Supabase.'));
+        if (ex && !window.__sbErr) { ex.addEventListener('load', res); ex.addEventListener('error', fail); if (globalThis.supabase) res(); return; }
+        const s = document.createElement('script'); s.src = SUPABASE_CDN; s.onload = res; s.onerror = fail; document.head.appendChild(s);
       });
     }
     this.client = supabase.createClient(CLOUD.url, CLOUD.key, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }, realtime: { params: { eventsPerSecond: 40 } } });
@@ -60,11 +62,25 @@ const Cloud = {
     if (!this.user) return null;
     for (let i = 0; i < 4; i++) { // o gatilho do banco cria o perfil logo após o cadastro
       const p = await this._ok(this.client.from('profiles').select('*').eq('id', this.user.id).maybeSingle());
-      if (p) return this.profile = p; await new Promise(r => setTimeout(r, 400));
+      if (p) return this.profile = this._ext(p); await new Promise(r => setTimeout(r, 400));
     }
-    const p = await this._ok(this.client.from('profiles').upsert({ id: this.user.id, is_guest: !!this.user.is_anonymous }).select().single()); return this.profile = p;
+    const p = await this._ok(this.client.from('profiles').upsert({ id: this.user.id, is_guest: !!this.user.is_anonymous }).select().single()); return this.profile = this._ext(p);
   },
-  async updateProfile(patch) { await this._ok(this.client.from('profiles').update(patch).eq('id', this.user.id)); this.profile = Object.assign(this.profile || {}, patch); },
+  /* colunas avatar/prefs vêm da migração 002; sem elas tudo continua funcionando só neste navegador */
+  _ext(p) {
+    this.noExt = !('prefs' in p) || !('avatar' in p);
+    if (!this.noExt && typeof Prefs !== 'undefined') { this.profile = p; Prefs.adopt(p.prefs); }
+    if (typeof paintDock === 'function') setTimeout(paintDock, 0);
+    return p;
+  },
+  async _tryProfile(patch) {
+    if (this.noExt) return false;
+    try { await this.updateProfile(patch); return true; }
+    catch (e) { if (/column|schema cache|avatar|prefs/i.test((e && e.message) || '')) { this.noExt = true; return false; } throw e; }
+  },
+  savePrefs(prefs) { return this._tryProfile({ prefs }); },
+  saveAvatar(data) { return this._tryProfile({ avatar: data || null }); },
+  async updateProfile(patch) { await this._ok(this.client.from('profiles').update(patch).eq('id', this.user.id)); this.profile = Object.assign(this.profile || {}, patch); if (typeof paintDock === 'function') paintDock(); },
 
   /* ---- campanhas ---- */
   async myCampaigns() { return await this._ok(this.client.rpc('my_campaigns')) || []; },
@@ -78,7 +94,7 @@ const Cloud = {
     return { row, assets };
   },
   async saveCampaign(id, C, assets) {
-    const data = Object.assign({}, C, { characters: {} });
+    const data = Object.assign({}, C, { characters: {}, pcs: Object.values(C.characters || {}).filter(x => x.pc) });
     await this._ok(this.client.from('campaigns').update({ name: C.name || 'Campanha', data }).eq('id', id));
     const used = Object.keys(assets).filter(k => !/^pa_/.test(k)); // fotos de jogadores não entram na campanha
     const fresh = used.filter(k => !this._uploaded.has(k));
